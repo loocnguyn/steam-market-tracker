@@ -1,36 +1,72 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Steam Market Tracker
 
-## Getting Started
+Theo dõi order book (lệnh mua/bán) và biểu đồ giá của nhiều item Steam Market cùng lúc, gần realtime.
 
-First, run the development server:
+## Stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- **Next.js 14** (App Router, TypeScript) — frontend + API proxy
+- **Tailwind CSS** + lightweight-charts
+- **Supabase** — Postgres, Auth (GitHub OAuth), Realtime
+- **Vercel** — deploy (auto từ GitHub, preview mỗi branch)
+
+## Kiến trúc
+
+```
+Browser ──► Next.js API route (proxy + cache) ──► Supabase (cache/DB)
+                          │
+                          └──► Steam endpoints (throttled, server-only)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Browser KHÔNG bao giờ gọi Steam trực tiếp (CORS + rate limit). Server là bên
+duy nhất fetch Steam, có throttle, cache vào Supabase, rồi đẩy xuống client
+qua Supabase Realtime để UI cập nhật "gần realtime".
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Steam endpoints dùng tới
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Mục đích | Hàm | Ghi chú |
+|---|---|---|
+| Resolve `item_nameid` | `resolveItemNameId` | Scrape 1 lần từ HTML trang listing, lưu DB |
+| Order book mua/bán | `getItemOrders` | Cần `item_nameid` |
+| Giá tổng quan | `getPriceOverview` | Nhẹ |
+| Chart lịch sử | `getPriceHistory` | **Cần cookie `steamLoginSecure`** (env) |
 
-## Learn More
+⚠️ Đây là unofficial API. Steam rate-limit ~20 req/phút/IP → phải cache mạnh
+và throttle. Đừng poll thẳng mỗi 1s (sẽ bị ban IP).
 
-To learn more about Next.js, take a look at the following resources:
+## Setup
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Cài deps:
+   ```bash
+   npm install
+   ```
+2. Tạo Supabase project, chạy `supabase/migrations/0001_init.sql` trong SQL editor.
+3. Copy env:
+   ```bash
+   cp .env.local.example .env.local
+   ```
+   Điền `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+   `SUPABASE_SERVICE_ROLE_KEY`. (Chart cần thêm `STEAM_LOGIN_COOKIE`.)
+4. Bật GitHub OAuth trong Supabase: Authentication > Providers > GitHub.
+5. Chạy dev:
+   ```bash
+   npm run dev
+   ```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Thử API proxy
 
-## Deploy on Vercel
+```
+GET /api/steam/orders?url=<link market listing của item>
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Roadmap
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [x] Phase 0 — scaffold, Supabase clients, schema, Steam scraper, API proxy
+- [ ] Phase 1 — UI add item + hiển thị order book
+- [ ] Phase 2 — watchlist theo user (auth GitHub)
+- [ ] Phase 3 — background poller + Realtime push + chart
+- [ ] Phase 4 — so sánh nhiều item, polish
+
+## Deploy (Vercel)
+
+Import repo trên Vercel → set env vars → mỗi push branch = Preview Deployment,
+merge vào `main` = Production.
