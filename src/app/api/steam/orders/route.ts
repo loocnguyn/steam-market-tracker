@@ -5,6 +5,7 @@ import {
   parseMarketUrl,
   SteamRateLimitError,
 } from "@/lib/steam/steam";
+import { recordSnapshot } from "@/lib/snapshots";
 
 // Always run on the server, never statically cached.
 export const dynamic = "force-dynamic";
@@ -51,6 +52,8 @@ export async function GET(req: NextRequest) {
       getItemOrders(appid, name),
       getItemInfo(appid, name).catch(() => null),
     ]);
+
+    await recordSnapshot(appid, name, orders.lowestSell, orders.highestBuy);
 
     return NextResponse.json({ ...orders, info });
   } catch (err) {

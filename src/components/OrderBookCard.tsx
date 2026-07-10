@@ -2,6 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { ItemInfo, ItemOrders } from "@/lib/steam/types";
+import { parseMarketUrl } from "@/lib/steam/steam";
+import { PriceChart } from "@/components/PriceChart";
 
 interface Props {
   url: string;
@@ -35,6 +37,7 @@ async function fetchOrders(url: string): Promise<OrdersResponse> {
 
 export function OrderBookCard({ url, onRemove }: Props) {
   const name = itemNameFromUrl(url);
+  const parsed = parseMarketUrl(url);
   const { data, error, isLoading, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ["orders", url],
     queryFn: () => fetchOrders(url),
@@ -107,6 +110,18 @@ export function OrderBookCard({ url, onRemove }: Props) {
               <OrderTable rows={data.buy.slice(0, 6)} tone="buy" />
             </div>
           </div>
+
+          {parsed && (
+            <div>
+              <p className="mb-1 text-xs font-medium text-zinc-400">
+                Price history
+              </p>
+              <PriceChart
+                appid={parsed.appid}
+                marketHashName={parsed.marketHashName}
+              />
+            </div>
+          )}
 
           <p className="text-right text-[10px] text-zinc-600">
             {isFetching
