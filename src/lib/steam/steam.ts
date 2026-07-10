@@ -183,15 +183,18 @@ export async function convertOrdersToVnd(
   orders: ItemOrders,
   appid: number,
   marketHashName: string,
+  /** Pass a cached VND anchor to skip the extra priceoverview Steam call. */
+  cachedVndAnchor?: number | null,
 ): Promise<ItemOrders> {
   if (orders.currencySymbol === "₫") return orders; // already VND
   const anchorNative = orders.sell[0]?.price ?? orders.buy[0]?.price;
   if (!anchorNative) return orders; // nothing to anchor the ratio to
 
-  const vndOverview = await getPriceOverview(appid, marketHashName, CURRENCY.VND);
-  const vndAnchor = vndOverview.lowestPrice
-    ? parseAmount(vndOverview.lowestPrice)
-    : null;
+  let vndAnchor = cachedVndAnchor ?? null;
+  if (!vndAnchor) {
+    const vndOverview = await getPriceOverview(appid, marketHashName, CURRENCY.VND);
+    vndAnchor = vndOverview.lowestPrice ? parseAmount(vndOverview.lowestPrice) : null;
+  }
   if (!vndAnchor) return orders;
 
   const rate = vndAnchor / anchorNative;
