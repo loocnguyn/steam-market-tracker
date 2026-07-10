@@ -227,6 +227,52 @@ export async function getPriceHistory(
 /** Base URL for Steam economy item icons; combine with an `icon_url`. */
 const ICON_BASE = "https://community.cloudflare.steamstatic.com/economy/image";
 
+export interface SearchResult {
+  appid: number;
+  marketHashName: string;
+  name: string;
+  appName: string;
+  iconUrl: string | null;
+  type: string | null;
+  sellPriceText: string | null;
+}
+
+/**
+ * Search Steam Market items by name across all games (no appid = global
+ * search). Used to let users find and add items without needing a listing
+ * URL.
+ */
+export async function searchItems(
+  query: string,
+  count = 12,
+): Promise<SearchResult[]> {
+  const url = `${BASE}/search/render/?query=${encodeName(query)}&start=0&count=${count}&norender=1`;
+  const res = await steamFetch(url);
+  const data = (await res.json()) as {
+    success: boolean;
+    results?: {
+      name: string;
+      hash_name: string;
+      app_name: string;
+      sell_price_text?: string;
+      asset_description?: { appid: number; icon_url?: string; type?: string };
+    }[];
+  };
+  return (data.results ?? [])
+    .filter((r) => r.asset_description?.appid)
+    .map((r) => ({
+      appid: r.asset_description!.appid,
+      marketHashName: r.hash_name,
+      name: r.name,
+      appName: r.app_name,
+      iconUrl: r.asset_description?.icon_url
+        ? `${ICON_BASE}/${r.asset_description.icon_url}`
+        : null,
+      type: r.asset_description?.type ?? null,
+      sellPriceText: r.sell_price_text ?? null,
+    }));
+}
+
 /**
  * Look up an item's icon and short type/description via the market search
  * endpoint (returns clean JSON, no HTML scraping needed). Matches by exact
@@ -273,4 +319,9 @@ export function parseMarketUrl(
   } catch {
     return null;
   }
+}
+
+/** Build a Steam Market listing URL for display ("View on Steam" links). */
+export function buildMarketUrl(appid: number, marketHashName: string): string {
+  return `https://steamcommunity.com/market/listings/${appid}/${encodeName(marketHashName)}`;
 }

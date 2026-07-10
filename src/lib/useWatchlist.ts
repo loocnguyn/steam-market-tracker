@@ -3,12 +3,16 @@
 import { useCallback, useEffect, useState } from "react";
 
 export interface WatchedItem {
-  /** Steam Market listing URL, used as the stable key for this entry. */
-  url: string;
+  appid: number;
+  marketHashName: string;
   addedAt: number;
 }
 
-const STORAGE_KEY = "steam-tracker:watchlist";
+const STORAGE_KEY = "steam-tracker:watchlist:v2";
+
+function key(item: { appid: number; marketHashName: string }): string {
+  return `${item.appid}:${item.marketHashName}`;
+}
 
 /**
  * Local (browser-only) watchlist. Phase 1 stopgap until per-user watchlist
@@ -32,16 +36,18 @@ export function useWatchlist() {
     if (loaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
   }, [items, loaded]);
 
-  const add = useCallback((url: string) => {
+  const add = useCallback((appid: number, marketHashName: string) => {
     setItems((prev) =>
-      prev.some((i) => i.url === url)
+      prev.some((i) => key(i) === key({ appid, marketHashName }))
         ? prev
-        : [...prev, { url, addedAt: Date.now() }],
+        : [...prev, { appid, marketHashName, addedAt: Date.now() }],
     );
   }, []);
 
-  const remove = useCallback((url: string) => {
-    setItems((prev) => prev.filter((i) => i.url !== url));
+  const remove = useCallback((appid: number, marketHashName: string) => {
+    setItems((prev) =>
+      prev.filter((i) => key(i) !== key({ appid, marketHashName })),
+    );
   }, []);
 
   return { items, loaded, add, remove };
