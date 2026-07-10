@@ -9,6 +9,10 @@ interface Props {
   appid: number;
   marketHashName: string;
   onRemove: (appid: number, marketHashName: string) => void;
+  /** Captured at add-time from a search result, if available — lets the
+   *  icon render immediately instead of depending on the order-book fetch. */
+  initialIconUrl?: string | null;
+  initialType?: string | null;
 }
 
 const numberFmt = new Intl.NumberFormat("en-US", {
@@ -40,34 +44,52 @@ async function fetchOrders(appid: number, name: string): Promise<OrdersResponse>
   return data;
 }
 
-export function OrderBookCard({ appid, marketHashName, onRemove }: Props) {
+export function OrderBookCard({
+  appid,
+  marketHashName,
+  onRemove,
+  initialIconUrl,
+  initialType,
+}: Props) {
   const url = buildMarketUrl(appid, marketHashName);
   const { data, error, isLoading, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ["orders", appid, marketHashName],
     queryFn: () => fetchOrders(appid, marketHashName),
   });
 
+  // Prefer the freshest icon/type from the server, fall back to what we
+  // already had at add-time (from a search result) so the icon shows
+  // instantly instead of a spinner that never resolves if the server-side
+  // lookup ever comes back empty.
+  const iconUrl = data?.info?.iconUrl ?? initialIconUrl ?? null;
+  const typeText = data?.info?.type ?? initialType ?? null;
+
   return (
     <div className="group flex flex-col gap-4 rounded-2xl border border-white/[0.06] bg-gradient-to-b from-zinc-900/80 to-zinc-900/40 p-5 shadow-lg shadow-black/20 backdrop-blur transition-all hover:border-white/[0.12] hover:shadow-xl hover:shadow-black/30">
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-start gap-3 min-w-0">
           <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-white/[0.08] bg-zinc-950/60">
-            {data?.info?.iconUrl ? (
+            {iconUrl ? (
               <img
-                src={data.info.iconUrl}
+                src={iconUrl}
                 alt={marketHashName}
                 className="h-full w-full object-contain p-1"
               />
-            ) : (
+            ) : isLoading ? (
               <div className="h-6 w-6 animate-pulse rounded bg-zinc-800" />
+            ) : (
+              <svg viewBox="0 0 24 24" className="h-6 w-6 text-zinc-700" fill="none">
+                <rect x="4" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="1.5" />
+                <path d="M4 16l4-4 3 3 5-5 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+              </svg>
             )}
           </div>
           <div className="min-w-0">
             <h3 className="truncate text-sm font-semibold text-zinc-50">
               {marketHashName}
             </h3>
-            {data?.info?.type && (
-              <p className="truncate text-xs text-zinc-500">{data.info.type}</p>
+            {typeText && (
+              <p className="truncate text-xs text-zinc-500">{typeText}</p>
             )}
             <a
               href={url}

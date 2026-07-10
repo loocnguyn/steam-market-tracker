@@ -169,6 +169,47 @@ export async function getItemOrders(
   };
 }
 
+/**
+ * Convert an order book into VND, anchored to a real Steam VND price.
+ *
+ * The order-book listing page doesn't accept a currency override (GeoIP
+ * only), but `priceoverview` does. So: fetch the real VND lowest price via
+ * priceoverview, compute the ratio against our order book's own lowest price
+ * (same underlying item, same instant), and scale every row by that ratio.
+ * This tracks Steam's actual VND pricing rather than a stale/approximate FX
+ * rate, and self-corrects each time it's called.
+ */
+export async function convertOrdersToVnd(
+  orders: ItemOrders,
+  appid: number,
+  marketHashName: string,
+): Promise<ItemOrders> {
+  if (orders.currencySymbol === "₫") return orders; // already VND
+  const anchorNative = orders.sell[0]?.price ?? orders.buy[0]?.price;
+  if (!anchorNative) return orders; // nothing to anchor the ratio to
+
+  const vndOverview = await getPriceOverview(appid, marketHashName, CURRENCY.VND);
+  const vndAnchor = vndOverview.lowestPrice
+    ? parseAmount(vndOverview.lowestPrice)
+    : null;
+  if (!vndAnchor) return orders;
+
+  const rate = vndAnchor / anchorNative;
+  const scale = (level: OrderLevel): OrderLevel => ({
+    price: Math.round(level.price * rate),
+    quantity: level.quantity,
+  });
+
+  return {
+    ...orders,
+    lowestSell: orders.lowestSell != null ? Math.round(orders.lowestSell * rate) : null,
+    highestBuy: orders.highestBuy != null ? Math.round(orders.highestBuy * rate) : null,
+    sell: orders.sell.map(scale),
+    buy: orders.buy.map(scale),
+    currencySymbol: "₫",
+  };
+}
+
 /** Lightweight price overview (lowest/median/volume). */
 export async function getPriceOverview(
   appid: number,
