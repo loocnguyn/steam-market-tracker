@@ -12,6 +12,7 @@ export async function recordSnapshot(
   marketHashName: string,
   lowestSell: number | null,
   highestBuy: number | null,
+  currencySymbol: string | null,
 ): Promise<void> {
   try {
     const supabase = createServiceClient();
@@ -36,6 +37,7 @@ export async function recordSnapshot(
         item_id: item.id,
         lowest_sell: lowestSell,
         highest_buy: highestBuy,
+        currency_symbol: currencySymbol,
       });
 
     if (snapshotError) {

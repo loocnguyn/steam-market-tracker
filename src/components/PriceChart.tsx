@@ -43,7 +43,7 @@ export function PriceChart({ appid, marketHashName }: Props) {
 
       const { data: snapshots } = await supabase
         .from("price_snapshots")
-        .select("lowest_sell, captured_at")
+        .select("lowest_sell, currency_symbol, captured_at")
         .eq("item_id", item.id)
         .not("lowest_sell", "is", null)
         .order("captured_at", { ascending: true })
@@ -51,9 +51,19 @@ export function PriceChart({ appid, marketHashName }: Props) {
 
       if (cancelled) return;
 
+      // Steam's price currency depends on GeoIP of the requesting server and
+      // can vary between snapshots. Mixing currencies in one line would be
+      // meaningless (e.g. USD cents next to VND thousands), so only plot
+      // points that match the most recent snapshot's currency.
+      const latestCurrency =
+        snapshots && snapshots.length > 0
+          ? snapshots[snapshots.length - 1].currency_symbol
+          : null;
+
       const seen = new Set<number>();
       const parsed: SnapshotPoint[] = [];
       for (const s of snapshots ?? []) {
+        if (s.currency_symbol !== latestCurrency) continue;
         const time = Math.floor(
           new Date(s.captured_at).getTime() / 1000,
         ) as UTCTimestamp;

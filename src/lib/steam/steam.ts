@@ -53,24 +53,58 @@ export class SteamRateLimitError extends Error {
   }
 }
 
-/** Parse Steam's "1.500₫" / "15,995" style strings into a number. */
-function parseNumber(raw: string): number {
-  const cleaned = raw.replace(/[^\d.,]/g, "");
-  // VND formatting uses '.' as a thousands separator and no decimals.
-  const normalized = cleaned.replace(/[.,]/g, "");
-  const n = Number(normalized);
+/**
+ * Parse a Steam-formatted amount string into a number, WITHOUT assuming a
+ * fixed currency.
+ *
+ * Steam's price display currency depends on GeoIP of the requesting IP (not
+ * controllable via query param — verified empirically), so the same code can
+ * see "11.500₫" (VND, '.' = thousands sep, no decimals) from one server
+ * region and "$0.40" (USD, '.' = decimal point) from another. Blindly
+ * stripping separators breaks USD-style amounts ("$0.40" -> wrongly parsed
+ * as 40). Instead: inspect how many digits follow the LAST separator — 1-2
+ * digits means it's a decimal point (keep it), 3 means it's a thousands
+ * separator (strip it).
+ */
+function parseAmount(raw: string): number {
+  const noSuffix = raw.replace(/\s*(or more|or less)\s*$/i, "");
+  const numeric = noSuffix.replace(/[^\d.,]/g, "");
+  const lastSepIdx = Math.max(numeric.lastIndexOf("."), numeric.lastIndexOf(","));
+  if (lastSepIdx === -1) {
+    const n = Number(numeric);
+    return Number.isFinite(n) ? n : 0;
+  }
+  const decimalDigits = numeric.length - lastSepIdx - 1;
+  if (decimalDigits === 1 || decimalDigits === 2) {
+    const intPart = numeric.slice(0, lastSepIdx).replace(/[.,]/g, "");
+    const fracPart = numeric.slice(lastSepIdx + 1);
+    const n = Number(`${intPart}.${fracPart}`);
+    return Number.isFinite(n) ? n : 0;
+  }
+  const n = Number(numeric.replace(/[.,]/g, ""));
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Extract the currency symbol (e.g. "₫", "$") from a Steam amount string. */
+function extractCurrencySymbol(raw: string): string | null {
+  const noSuffix = raw.replace(/\s*(or more|or less)\s*$/i, "");
+  const match = noSuffix.match(/[^\d.,\s]+/g);
+  return match ? match.join("") : null;
+}
+
 /** Extract Price/Quantity rows from one rendered order-book `<table>`. */
-function parseOrderTable(tableHtml: string): OrderLevel[] {
+function parseOrderTable(
+  tableHtml: string,
+): { rows: OrderLevel[]; currencySymbol: string | null } {
   const rows: OrderLevel[] = [];
+  let currencySymbol: string | null = null;
   const rowRe = /<tr><td><span[^>]*>([^<]+)<\/span><\/td><td><span[^>]*>([^<]+)<\/span><\/td><\/tr>/g;
   let m: RegExpExecArray | null;
   while ((m = rowRe.exec(tableHtml))) {
-    rows.push({ price: parseNumber(m[1]), quantity: parseNumber(m[2]) });
+    if (currencySymbol === null) currencySymbol = extractCurrencySymbol(m[1]);
+    rows.push({ price: parseAmount(m[1]), quantity: parseAmount(m[2]) });
   }
-  return rows;
+  return { rows, currencySymbol };
 }
 
 /**
@@ -91,8 +125,11 @@ function extractTableAfter(html: string, anchor: string): string | null {
  * server-rendered HTML (the "lệnh mua / lệnh bán" table).
  *
  * NOTE: currency is NOT controllable via query param on the new page — it
- * follows Steam's own GeoIP/locale detection. For Vietnamese users this
- * reliably renders in VND (₫), which is what this app targets.
+ * follows Steam's own GeoIP detection of the requesting server's IP
+ * (verified empirically), so it can vary between deployments/regions. The
+ * returned `currencySymbol` reflects whatever Steam actually served —
+ * callers MUST display prices using it rather than assuming a fixed
+ * currency, or numbers will be mislabeled (e.g. USD "$0.40" shown as "40₫").
  */
 export async function getItemOrders(
   appid: number,
@@ -104,9 +141,6 @@ export async function getItemOrders(
 
   const sellTable = extractTableAfter(html, "for sale starting at");
   const buyTable = extractTableAfter(html, "requests to buy at");
-
-  const sell = sellTable ? parseOrderTable(sellTable) : [];
-  const buy = buyTable ? parseOrderTable(buyTable) : [];
 
   if (!sellTable && !buyTable) {
     if (html.includes("This item is a commodity")) {
@@ -122,11 +156,15 @@ export async function getItemOrders(
     );
   }
 
+  const sellParsed = sellTable ? parseOrderTable(sellTable) : null;
+  const buyParsed = buyTable ? parseOrderTable(buyTable) : null;
+
   return {
-    lowestSell: sell[0]?.price ?? null,
-    highestBuy: buy[0]?.price ?? null,
-    sell,
-    buy,
+    lowestSell: sellParsed?.rows[0]?.price ?? null,
+    highestBuy: buyParsed?.rows[0]?.price ?? null,
+    currencySymbol: sellParsed?.currencySymbol ?? buyParsed?.currencySymbol ?? null,
+    sell: sellParsed?.rows ?? [],
+    buy: buyParsed?.rows ?? [],
     capturedAt: Date.now(),
   };
 }

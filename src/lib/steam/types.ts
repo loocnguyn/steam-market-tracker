@@ -18,6 +18,12 @@ export interface ItemOrders {
   sell: OrderLevel[];
   /** Buy orders, descending by price. */
   buy: OrderLevel[];
+  /**
+   * The currency symbol Steam actually rendered prices in (e.g. "₫", "$").
+   * Steam picks this by GeoIP of the requesting server, not a fixed value —
+   * always display prices using this rather than assuming a currency.
+   */
+  currencySymbol: string | null;
   /** When this snapshot was captured (ms epoch). */
   capturedAt: number;
 }
