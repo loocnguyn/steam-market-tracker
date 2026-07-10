@@ -53,7 +53,13 @@ export async function GET(req: NextRequest) {
       getItemInfo(appid, name).catch(() => null),
     ]);
 
-    await recordSnapshot(appid, name, orders.lowestSell, orders.highestBuy);
+    await recordSnapshot(
+      appid,
+      name,
+      orders.lowestSell,
+      orders.highestBuy,
+      orders.currencySymbol,
+    );
 
     return NextResponse.json({ ...orders, info });
   } catch (err) {

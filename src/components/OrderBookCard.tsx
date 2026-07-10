@@ -20,11 +20,23 @@ function itemNameFromUrl(url: string): string {
   }
 }
 
-const fmt = new Intl.NumberFormat("vi-VN", {
-  style: "currency",
-  currency: "VND",
-  maximumFractionDigits: 0,
+const numberFmt = new Intl.NumberFormat("en-US", {
+  maximumFractionDigits: 2,
 });
+
+// Steam serves prices in whatever currency it GeoIP-detects for the
+// requesting server, not a fixed one — so amounts must always be formatted
+// with the currency symbol Steam actually returned (data.currencySymbol),
+// never a hardcoded one. A few symbols are conventionally prefixed.
+const PREFIX_SYMBOLS = new Set(["$", "£", "€"]);
+
+function formatAmount(value: number, symbol: string | null): string {
+  const formatted = numberFmt.format(value);
+  if (!symbol) return formatted;
+  return PREFIX_SYMBOLS.has(symbol)
+    ? `${symbol}${formatted}`
+    : `${formatted} ${symbol}`;
+}
 
 type OrdersResponse = ItemOrders & { info: ItemInfo | null };
 
@@ -89,13 +101,17 @@ export function OrderBookCard({ url, onRemove }: Props) {
             <div>
               <span className="text-zinc-500">Lowest sell: </span>
               <span className="font-medium text-emerald-400">
-                {data.lowestSell != null ? fmt.format(data.lowestSell) : "—"}
+                {data.lowestSell != null
+                  ? formatAmount(data.lowestSell, data.currencySymbol)
+                  : "—"}
               </span>
             </div>
             <div>
               <span className="text-zinc-500">Highest buy: </span>
               <span className="font-medium text-sky-400">
-                {data.highestBuy != null ? fmt.format(data.highestBuy) : "—"}
+                {data.highestBuy != null
+                  ? formatAmount(data.highestBuy, data.currencySymbol)
+                  : "—"}
               </span>
             </div>
           </div>
@@ -103,11 +119,19 @@ export function OrderBookCard({ url, onRemove }: Props) {
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div>
               <p className="mb-1 font-medium text-zinc-400">Sell orders</p>
-              <OrderTable rows={data.sell.slice(0, 6)} tone="sell" />
+              <OrderTable
+                rows={data.sell.slice(0, 6)}
+                tone="sell"
+                currencySymbol={data.currencySymbol}
+              />
             </div>
             <div>
               <p className="mb-1 font-medium text-zinc-400">Buy orders</p>
-              <OrderTable rows={data.buy.slice(0, 6)} tone="buy" />
+              <OrderTable
+                rows={data.buy.slice(0, 6)}
+                tone="buy"
+                currencySymbol={data.currencySymbol}
+              />
             </div>
           </div>
 
@@ -137,9 +161,11 @@ export function OrderBookCard({ url, onRemove }: Props) {
 function OrderTable({
   rows,
   tone,
+  currencySymbol,
 }: {
   rows: { price: number; quantity: number }[];
   tone: "sell" | "buy";
+  currencySymbol: string | null;
 }) {
   if (rows.length === 0) {
     return <p className="text-zinc-600">No data</p>;
@@ -160,7 +186,7 @@ function OrderTable({
                 tone === "sell" ? "text-emerald-400" : "text-sky-400"
               }
             >
-              {fmt.format(r.price)}
+              {formatAmount(r.price, currencySymbol)}
             </td>
             <td className="text-right text-zinc-400">{r.quantity}</td>
           </tr>
