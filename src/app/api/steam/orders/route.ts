@@ -10,6 +10,7 @@ import { getCachedItemInfo, cacheItemInfo } from "@/lib/itemInfoCache";
 import { getCachedOrders, setCachedOrders } from "@/lib/ordersCache";
 import { getCachedVndAnchor } from "@/lib/vndCache";
 import { getGlobalFxRate, updateGlobalFxRate } from "@/lib/fxRateCache";
+import { getStoredSteamCookie } from "@/lib/appSettings";
 
 // Always run on the server, never statically cached.
 export const dynamic = "force-dynamic";
@@ -59,7 +60,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(cached);
     }
 
-    const rawOrders = await getItemOrders(appid, name);
+    // With a logged-in session cookie, Steam serves this page in the
+    // account's real wallet currency (VND) directly — no conversion math
+    // needed at all, and it's exactly what the account sees in a browser.
+    const sessionCookie = await getStoredSteamCookie().catch(() => null);
+    const rawOrders = await getItemOrders(appid, name, sessionCookie);
 
     // Icon/type come from the SAME listing-page HTML we just fetched — no
     // extra Steam call. Only fall back to the (rate-limited) search
