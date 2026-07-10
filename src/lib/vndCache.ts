@@ -1,7 +1,12 @@
 import { createServiceClient } from "@/lib/supabase/server";
 import { getPriceOverview, CURRENCY } from "@/lib/steam/steam";
 
-const TTL_MS = 5 * 60 * 1000; // 5 minutes — FX/price barely moves that fast
+// Refresh window for the VND anchor. Long on purpose: Steam rate-limits
+// hard, and a slightly stale anchor (order-of-hours) is far better than
+// falling back to the wrong currency entirely. Once an item has a
+// successful anchor it should basically never need re-fetching for normal
+// browsing — only genuinely new items need a fresh Steam call.
+const TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 /**
  * Cached VND anchor price (from `priceoverview`) used to convert order-book
