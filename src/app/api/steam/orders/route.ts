@@ -8,6 +8,7 @@ import {
 import { recordSnapshot } from "@/lib/snapshots";
 import { getCachedItemInfo } from "@/lib/itemInfoCache";
 import { getCachedOrders, setCachedOrders } from "@/lib/ordersCache";
+import { getCachedVndAnchor } from "@/lib/vndCache";
 
 // Always run on the server, never statically cached.
 export const dynamic = "force-dynamic";
@@ -57,13 +58,19 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(cached);
     }
 
-    const [rawOrders, info] = await Promise.all([
+    const [rawOrders, info, vndAnchor] = await Promise.all([
       getItemOrders(appid, name),
       getCachedItemInfo(appid, name),
+      getCachedVndAnchor(appid, name).catch(() => null),
     ]);
 
-    const orders = await convertOrdersToVnd(rawOrders, appid, name).catch(
-      () => rawOrders, // VND conversion is best-effort; native currency is a fine fallback
+    const orders = await convertOrdersToVnd(rawOrders, appid, name, vndAnchor).catch(
+      (err) => {
+        // VND conversion is best-effort; native currency is a fine fallback,
+        // but log so a persistent conversion failure isn't invisible.
+        console.error("convertOrdersToVnd failed:", (err as Error).message);
+        return rawOrders;
+      },
     );
 
     await recordSnapshot(
