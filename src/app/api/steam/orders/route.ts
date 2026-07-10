@@ -9,6 +9,7 @@ import { recordSnapshot } from "@/lib/snapshots";
 import { getCachedItemInfo } from "@/lib/itemInfoCache";
 import { getCachedOrders, setCachedOrders } from "@/lib/ordersCache";
 import { getCachedVndAnchor } from "@/lib/vndCache";
+import { getGlobalFxRate, updateGlobalFxRate } from "@/lib/fxRateCache";
 
 // Always run on the server, never statically cached.
 export const dynamic = "force-dynamic";
@@ -58,20 +59,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(cached);
     }
 
-    const [rawOrders, info, vndAnchor] = await Promise.all([
+    const [rawOrders, info] = await Promise.all([
       getItemOrders(appid, name),
       getCachedItemInfo(appid, name),
-      getCachedVndAnchor(appid, name).catch(() => null),
     ]);
 
-    const orders = await convertOrdersToVnd(rawOrders, appid, name, vndAnchor).catch(
-      (err) => {
-        // VND conversion is best-effort; native currency is a fine fallback,
-        // but log so a persistent conversion failure isn't invisible.
-        console.error("convertOrdersToVnd failed:", (err as Error).message);
-        return rawOrders;
-      },
-    );
+    const orders = await resolveVndOrders(rawOrders, appid, name);
 
     await recordSnapshot(
       appid,
@@ -94,4 +87,42 @@ export async function GET(req: NextRequest) {
       { status: 500 },
     );
   }
+}
+
+/**
+ * Convert an order book to VND, preferring an exact per-item anchor
+ * (cached or freshly fetched from Steam's priceoverview) and falling back
+ * to an approximate global exchange rate when Steam's priceoverview
+ * endpoint is rate-limited and no per-item anchor has ever been recorded.
+ * An approximate VND price is far better UX than showing the wrong
+ * currency entirely — it self-corrects to exact once a real anchor lands.
+ */
+async function resolveVndOrders(
+  rawOrders: Awaited<ReturnType<typeof getItemOrders>>,
+  appid: number,
+  name: string,
+) {
+  if (rawOrders.currencySymbol === "₫") return rawOrders;
+
+  const anchorNative = rawOrders.sell[0]?.price ?? rawOrders.buy[0]?.price;
+  if (!anchorNative) return rawOrders;
+
+  const exactAnchor = await getCachedVndAnchor(appid, name).catch(() => null);
+
+  if (exactAnchor) {
+    // Keep the global fallback rate fresh whenever we get a real reading.
+    if (rawOrders.currencySymbol) {
+      updateGlobalFxRate(rawOrders.currencySymbol, exactAnchor / anchorNative).catch(
+        () => {},
+      );
+    }
+    return convertOrdersToVnd(rawOrders, appid, name, exactAnchor);
+  }
+
+  if (!rawOrders.currencySymbol) return rawOrders;
+  const fallbackRate = await getGlobalFxRate(rawOrders.currencySymbol).catch(() => null);
+  if (!fallbackRate) return rawOrders;
+
+  const approxAnchor = Math.round(anchorNative * fallbackRate);
+  return convertOrdersToVnd(rawOrders, appid, name, approxAnchor);
 }
