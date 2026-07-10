@@ -107,6 +107,34 @@ function parseOrderTable(
   return { rows, currencySymbol };
 }
 
+/** Base URL for Steam economy item icons; combine with an `icon_url`. */
+const ICON_BASE = "https://community.cloudflare.steamstatic.com/economy/image";
+
+/**
+ * Extract icon_url and item type from the listing page's embedded SSR data.
+ *
+ * The page ships its item metadata as a JSON blob that's been
+ * JSON.stringify'd multiple times (escaping compounds each time — 3
+ * backslashes on some pages, 6 on others), so we match loosely on "one or
+ * more backslashes" rather than a fixed escape depth. `type` appears
+ * multiple times in the payload (e.g. "bbcode" inside descriptions), so we
+ * anchor specifically to the one immediately preceding `market_name`, which
+ * is always the item's display type.
+ *
+ * This reads data from the SAME HTML response `getItemOrders` already
+ * fetches — zero extra Steam calls, unlike the old search-endpoint lookup
+ * (which has its own, much stricter rate limit).
+ */
+function extractIconAndType(html: string): { iconUrl: string | null; itemType: string | null } {
+  const iconMatch = html.match(/icon_url\\+"+\s*:\s*\\+"+([A-Za-z0-9_-]+)/);
+  const iconUrl = iconMatch ? `${ICON_BASE}/${iconMatch[1]}` : null;
+
+  const typeMatch = html.match(/"type\\+"+\s*:\s*\\+"+([^\\]+)\\+"+\s*,\s*\\+"+market_name/);
+  const itemType = typeMatch ? typeMatch[1] : null;
+
+  return { iconUrl, itemType };
+}
+
 /**
  * Extract the `<table class="...">...</table>` immediately following the
  * given anchor phrase (e.g. "for sale starting at" or "requests to buy at").
@@ -158,6 +186,7 @@ export async function getItemOrders(
 
   const sellParsed = sellTable ? parseOrderTable(sellTable) : null;
   const buyParsed = buyTable ? parseOrderTable(buyTable) : null;
+  const { iconUrl, itemType } = extractIconAndType(html);
 
   return {
     lowestSell: sellParsed?.rows[0]?.price ?? null,
@@ -165,6 +194,8 @@ export async function getItemOrders(
     currencySymbol: sellParsed?.currencySymbol ?? buyParsed?.currencySymbol ?? null,
     sell: sellParsed?.rows ?? [],
     buy: buyParsed?.rows ?? [],
+    iconUrl,
+    itemType,
     capturedAt: Date.now(),
   };
 }
@@ -267,9 +298,6 @@ export async function getPriceHistory(
     volume: Number(volumeStr),
   }));
 }
-
-/** Base URL for Steam economy item icons; combine with an `icon_url`. */
-const ICON_BASE = "https://community.cloudflare.steamstatic.com/economy/image";
 
 export interface SearchResult {
   appid: number;
