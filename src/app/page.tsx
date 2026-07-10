@@ -2,10 +2,13 @@
 
 import { ItemSearch } from "@/components/ItemSearch";
 import { OrderBookCard } from "@/components/OrderBookCard";
+import { AuthButton } from "@/components/AuthButton";
 import { useWatchlist } from "@/lib/useWatchlist";
+import { useAuth } from "@/lib/useAuth";
 
 export default function Home() {
-  const { items, loaded, add, remove } = useWatchlist();
+  const { user, loading: authLoading, signIn, signOut } = useAuth();
+  const { items, loaded, add, remove } = useWatchlist(user, authLoading);
 
   return (
     <main className="relative min-h-full flex-1">
@@ -15,6 +18,10 @@ export default function Home() {
       />
 
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-14">
+        <div className="flex justify-end">
+          <AuthButton user={user} loading={authLoading} onSignIn={signIn} onSignOut={signOut} />
+        </div>
+
         <header className="flex flex-col items-center gap-3 text-center">
           <div className="flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1 text-xs text-zinc-400">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
@@ -28,6 +35,11 @@ export default function Home() {
             track live buy/sell order books and price history — all in one
             place.
           </p>
+          {!authLoading && !user && (
+            <p className="text-xs text-zinc-600">
+              Sign in through Steam to keep your watchlist across devices.
+            </p>
+          )}
         </header>
 
         <div className="flex justify-center">
