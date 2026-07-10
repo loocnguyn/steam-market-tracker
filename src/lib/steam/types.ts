@@ -24,6 +24,12 @@ export interface ItemOrders {
    * always display prices using this rather than assuming a currency.
    */
   currencySymbol: string | null;
+  /**
+   * Icon/type extracted from the SAME listing page HTML — no extra Steam
+   * call needed, unlike the old search-endpoint-based lookup.
+   */
+  iconUrl: string | null;
+  itemType: string | null;
   /** When this snapshot was captured (ms epoch). */
   capturedAt: number;
 }

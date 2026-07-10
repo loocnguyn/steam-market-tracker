@@ -6,7 +6,7 @@ import {
   SteamRateLimitError,
 } from "@/lib/steam/steam";
 import { recordSnapshot } from "@/lib/snapshots";
-import { getCachedItemInfo } from "@/lib/itemInfoCache";
+import { getCachedItemInfo, cacheItemInfo } from "@/lib/itemInfoCache";
 import { getCachedOrders, setCachedOrders } from "@/lib/ordersCache";
 import { getCachedVndAnchor } from "@/lib/vndCache";
 import { getGlobalFxRate, updateGlobalFxRate } from "@/lib/fxRateCache";
@@ -59,10 +59,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(cached);
     }
 
-    const [rawOrders, info] = await Promise.all([
-      getItemOrders(appid, name),
-      getCachedItemInfo(appid, name),
-    ]);
+    const rawOrders = await getItemOrders(appid, name);
+
+    // Icon/type come from the SAME listing-page HTML we just fetched — no
+    // extra Steam call. Only fall back to the (rate-limited) search
+    // endpoint if that extraction genuinely found nothing.
+    let info: { iconUrl: string | null; type: string | null };
+    if (rawOrders.iconUrl || rawOrders.itemType) {
+      info = { iconUrl: rawOrders.iconUrl, type: rawOrders.itemType };
+      cacheItemInfo(appid, name, info).catch(() => {});
+    } else {
+      info = await getCachedItemInfo(appid, name);
+    }
 
     const orders = await resolveVndOrders(rawOrders, appid, name);
 
