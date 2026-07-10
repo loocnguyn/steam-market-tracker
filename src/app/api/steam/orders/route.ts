@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getItemOrders, parseMarketUrl, SteamRateLimitError } from "@/lib/steam/steam";
+import {
+  getItemOrders,
+  getItemInfo,
+  parseMarketUrl,
+  SteamRateLimitError,
+} from "@/lib/steam/steam";
 
 // Always run on the server, never statically cached.
 export const dynamic = "force-dynamic";
@@ -8,8 +13,9 @@ export const dynamic = "force-dynamic";
  * GET /api/steam/orders?url=<market listing url>
  *   or ?appid=..&name=..
  *
- * Returns the current buy/sell order book. This is the PROXY the browser
- * talks to — the browser must never hit Steam directly (CORS + rate limits).
+ * Returns the current buy/sell order book plus icon/type info. This is the
+ * PROXY the browser talks to — the browser must never hit Steam directly
+ * (CORS + rate limits).
  *
  * NOTE: For production this should read from the Supabase cache populated by
  * the background poller instead of hitting Steam on every request.
@@ -41,8 +47,12 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const orders = await getItemOrders(appid, name);
-    return NextResponse.json(orders);
+    const [orders, info] = await Promise.all([
+      getItemOrders(appid, name),
+      getItemInfo(appid, name).catch(() => null),
+    ]);
+
+    return NextResponse.json({ ...orders, info });
   } catch (err) {
     if (err instanceof SteamRateLimitError) {
       return NextResponse.json({ error: err.message }, { status: 429 });

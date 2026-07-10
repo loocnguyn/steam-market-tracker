@@ -36,3 +36,9 @@ export interface PricePoint {
   price: number;
   volume: number;
 }
+
+/** Item icon + short description, used for display. */
+export interface ItemInfo {
+  iconUrl: string | null;
+  type: string | null;
+}

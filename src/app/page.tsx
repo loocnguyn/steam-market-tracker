@@ -14,7 +14,7 @@ export default function Home() {
           Steam Market Tracker
         </h1>
         <p className="text-sm text-zinc-500">
-          Theo dõi order book mua/bán của nhiều item Steam Market cùng lúc.
+          Track live buy/sell order books for multiple Steam Market items at once.
         </p>
       </header>
 
@@ -22,7 +22,7 @@ export default function Home() {
 
       {loaded && items.length === 0 && (
         <p className="text-sm text-zinc-500">
-          Chưa có item nào. Dán link Steam Market listing ở trên để bắt đầu.
+          No items yet. Paste a Steam Market listing link above to get started.
         </p>
       )}
 
