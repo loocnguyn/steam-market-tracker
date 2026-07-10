@@ -162,9 +162,20 @@ function extractTableAfter(html: string, anchor: string): string | null {
 export async function getItemOrders(
   appid: number,
   marketHashName: string,
+  /**
+   * A logged-in `steamLoginSecure` cookie value. When present, Steam serves
+   * this page in the ACCOUNT's own wallet currency instead of GeoIP-guessing
+   * from the server's IP — for a Vietnamese account that's real VND,
+   * byte-for-byte identical to what the account sees in a browser, with no
+   * conversion/approximation needed at all.
+   */
+  sessionCookie?: string | null,
 ): Promise<ItemOrders> {
   const url = `${BASE}/listings/${appid}/${encodeName(marketHashName)}`;
-  const res = await steamFetch(url);
+  const res = await steamFetch(
+    url,
+    sessionCookie ? { Cookie: `steamLoginSecure=${sessionCookie}` } : undefined,
+  );
   const html = await res.text();
 
   const sellTable = extractTableAfter(html, "for sale starting at");
