@@ -36,9 +36,3 @@ export interface PricePoint {
   price: number;
   volume: number;
 }
-
-export interface ResolvedItem {
-  appid: number;
-  marketHashName: string;
-  itemNameId: string;
-}
