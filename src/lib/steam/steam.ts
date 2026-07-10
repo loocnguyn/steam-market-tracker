@@ -1,10 +1,4 @@
-import type {
-  ItemOrders,
-  OrderLevel,
-  PriceOverview,
-  PricePoint,
-  ResolvedItem,
-} from "./types";
+import type { ItemOrders, OrderLevel, PriceOverview, PricePoint } from "./types";
 
 /**
  * Steam Market scraper.
@@ -12,6 +6,11 @@ import type {
  * IMPORTANT: These are unofficial endpoints. Steam rate-limits aggressively
  * (~20 req/min/IP). ALL calls must go through the server (never the browser)
  * and results MUST be cached. See README for the throttling strategy.
+ *
+ * Steam rolled out a redesigned (React SSR) market listing page that no
+ * longer exposes the classic `item_nameid` / itemordershistogram flow — the
+ * order book table is now rendered directly as HTML in the listing page
+ * response. So we parse that HTML instead of resolving item_nameid.
  */
 
 const BASE = "https://steamcommunity.com/market";
@@ -25,11 +24,10 @@ const DEFAULT_HEADERS: Record<string, string> = {
   "Accept-Language": "en-US,en;q=0.9",
 };
 
-/** Steam currency codes. 1 = USD, 20 = VND. */
-export const CURRENCY = { USD: 1, VND: 20 } as const;
+/** Steam currency codes (subset). VND is 15, not 20 — easy to get wrong. */
+export const CURRENCY = { USD: 1, VND: 15 } as const;
 
 function encodeName(name: string): string {
-  // Steam expects the hash name URL-encoded, but keeps some chars readable.
   return encodeURIComponent(name);
 }
 
@@ -55,82 +53,82 @@ export class SteamRateLimitError extends Error {
   }
 }
 
-/**
- * Resolve the internal `item_nameid` required by the order-book endpoint.
- *
- * This ID only appears embedded in the listing page HTML, so we scrape it
- * once and the caller should persist it (it never changes for an item).
- */
-export async function resolveItemNameId(
-  appid: number,
-  marketHashName: string,
-): Promise<ResolvedItem> {
-  const url = `${BASE}/listings/${appid}/${encodeName(marketHashName)}`;
-  const res = await steamFetch(url);
-  const html = await res.text();
-
-  // The page contains: Market_LoadOrderSpread( 176321926 );
-  const match = html.match(/Market_LoadOrderSpread\(\s*(\d+)\s*\)/);
-  if (!match) {
-    throw new Error(
-      `Could not find item_nameid for ${marketHashName}. ` +
-        `Item may not exist or the page structure changed.`,
-    );
-  }
-  return { appid, marketHashName, itemNameId: match[1] };
-}
-
-/** Parse Steam's "1.500₫" style strings into a number. */
-function parsePrice(raw: string): number {
+/** Parse Steam's "1.500₫" / "15,995" style strings into a number. */
+function parseNumber(raw: string): number {
   const cleaned = raw.replace(/[^\d.,]/g, "");
-  // Vietnamese/EU format uses '.' as thousands sep and ',' as decimal.
-  // Steam order histograms return integers for VND, so drop separators.
+  // VND formatting uses '.' as a thousands separator and no decimals.
   const normalized = cleaned.replace(/[.,]/g, "");
   const n = Number(normalized);
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Extract Price/Quantity rows from one rendered order-book `<table>`. */
+function parseOrderTable(tableHtml: string): OrderLevel[] {
+  const rows: OrderLevel[] = [];
+  const rowRe = /<tr><td><span[^>]*>([^<]+)<\/span><\/td><td><span[^>]*>([^<]+)<\/span><\/td><\/tr>/g;
+  let m: RegExpExecArray | null;
+  while ((m = rowRe.exec(tableHtml))) {
+    rows.push({ price: parseNumber(m[1]), quantity: parseNumber(m[2]) });
+  }
+  return rows;
+}
+
 /**
- * Fetch the buy/sell order book (the "lệnh mua / lệnh bán" table).
- * Requires the item_nameid from {@link resolveItemNameId}.
+ * Extract the `<table class="...">...</table>` immediately following the
+ * given anchor phrase (e.g. "for sale starting at" or "requests to buy at").
+ */
+function extractTableAfter(html: string, anchor: string): string | null {
+  const idx = html.indexOf(anchor);
+  if (idx === -1) return null;
+  const tableStart = html.indexOf("<table", idx);
+  const tableEnd = html.indexOf("</table>", tableStart);
+  if (tableStart === -1 || tableEnd === -1) return null;
+  return html.slice(tableStart, tableEnd + "</table>".length);
+}
+
+/**
+ * Fetch and parse the buy/sell order book directly from the listing page's
+ * server-rendered HTML (the "lệnh mua / lệnh bán" table).
+ *
+ * NOTE: currency is NOT controllable via query param on the new page — it
+ * follows Steam's own GeoIP/locale detection. For Vietnamese users this
+ * reliably renders in VND (₫), which is what this app targets.
  */
 export async function getItemOrders(
-  itemNameId: string,
-  currency: number = CURRENCY.VND,
-  country = "VN",
+  appid: number,
+  marketHashName: string,
 ): Promise<ItemOrders> {
-  const url =
-    `${BASE}/itemordershistogram?country=${country}&language=english` +
-    `&currency=${currency}&item_nameid=${itemNameId}&two_factor=0`;
-  const res = await steamFetch(url, { Referer: `${BASE}/` });
-  const data = (await res.json()) as SteamHistogramResponse;
+  const url = `${BASE}/listings/${appid}/${encodeName(marketHashName)}`;
+  const res = await steamFetch(url);
+  const html = await res.text();
 
-  const sell: OrderLevel[] = (data.sell_order_graph ?? []).map(
-    ([price, quantity]) => ({ price, quantity }),
-  );
-  const buy: OrderLevel[] = (data.buy_order_graph ?? []).map(
-    ([price, quantity]) => ({ price, quantity }),
-  );
+  const sellTable = extractTableAfter(html, "for sale starting at");
+  const buyTable = extractTableAfter(html, "requests to buy at");
+
+  const sell = sellTable ? parseOrderTable(sellTable) : [];
+  const buy = buyTable ? parseOrderTable(buyTable) : [];
+
+  if (!sellTable && !buyTable) {
+    if (html.includes("This item is a commodity")) {
+      // Page structure changed but we know it should have an order book.
+      throw new Error(
+        `Order book layout for ${marketHashName} changed unexpectedly.`,
+      );
+    }
+    throw new Error(
+      `${marketHashName} không có order book gộp (không phải commodity item — ` +
+        `mỗi item có giá trị riêng, ví dụ skin CS2 theo float). ` +
+        `Chỉ item dạng commodity (TF2, Dota 2, v.v.) mới có bảng lệnh mua/bán.`,
+    );
+  }
 
   return {
-    lowestSell: data.lowest_sell_order
-      ? parsePrice(data.lowest_sell_order)
-      : (sell[0]?.price ?? null),
-    highestBuy: data.highest_buy_order
-      ? parsePrice(data.highest_buy_order)
-      : (buy[0]?.price ?? null),
+    lowestSell: sell[0]?.price ?? null,
+    highestBuy: buy[0]?.price ?? null,
     sell,
     buy,
     capturedAt: Date.now(),
   };
-}
-
-interface SteamHistogramResponse {
-  success: number;
-  sell_order_graph?: [number, number, string][];
-  buy_order_graph?: [number, number, string][];
-  lowest_sell_order?: string;
-  highest_buy_order?: string;
 }
 
 /** Lightweight price overview (lowest/median/volume). */
