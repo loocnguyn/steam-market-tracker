@@ -51,6 +51,8 @@ export default function Home() {
               appid={item.appid}
               marketHashName={item.marketHashName}
               onRemove={remove}
+              initialIconUrl={item.iconUrl}
+              initialType={item.type}
             />
           ))}
         </div>

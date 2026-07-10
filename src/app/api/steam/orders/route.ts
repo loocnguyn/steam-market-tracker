@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getItemOrders,
-  getItemInfo,
+  convertOrdersToVnd,
   parseMarketUrl,
   SteamRateLimitError,
 } from "@/lib/steam/steam";
 import { recordSnapshot } from "@/lib/snapshots";
+import { getCachedItemInfo } from "@/lib/itemInfoCache";
+import { getCachedOrders, setCachedOrders } from "@/lib/ordersCache";
 
 // Always run on the server, never statically cached.
 export const dynamic = "force-dynamic";
@@ -14,12 +16,13 @@ export const dynamic = "force-dynamic";
  * GET /api/steam/orders?url=<market listing url>
  *   or ?appid=..&name=..
  *
- * Returns the current buy/sell order book plus icon/type info. This is the
- * PROXY the browser talks to — the browser must never hit Steam directly
- * (CORS + rate limits).
+ * Returns the current buy/sell order book (converted to VND) plus
+ * icon/type info. This is the PROXY the browser talks to — the browser
+ * must never hit Steam directly (CORS + rate limits).
  *
- * NOTE: For production this should read from the Supabase cache populated by
- * the background poller instead of hitting Steam on every request.
+ * Cached server-side for 20s (see lib/ordersCache.ts) — Steam rate-limits
+ * ~20 req/min/IP, and without caching every client poll would count against
+ * that budget directly.
  */
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
@@ -48,10 +51,20 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const [orders, info] = await Promise.all([
+    const cacheKey = `${appid}:${name}`;
+    const cached = await getCachedOrders(cacheKey);
+    if (cached) {
+      return NextResponse.json(cached);
+    }
+
+    const [rawOrders, info] = await Promise.all([
       getItemOrders(appid, name),
-      getItemInfo(appid, name).catch(() => null),
+      getCachedItemInfo(appid, name),
     ]);
+
+    const orders = await convertOrdersToVnd(rawOrders, appid, name).catch(
+      () => rawOrders, // VND conversion is best-effort; native currency is a fine fallback
+    );
 
     await recordSnapshot(
       appid,
@@ -61,7 +74,10 @@ export async function GET(req: NextRequest) {
       orders.currencySymbol,
     );
 
-    return NextResponse.json({ ...orders, info });
+    const payload = { ...orders, info };
+    await setCachedOrders(cacheKey, payload);
+
+    return NextResponse.json(payload);
   } catch (err) {
     if (err instanceof SteamRateLimitError) {
       return NextResponse.json({ error: err.message }, { status: 429 });
