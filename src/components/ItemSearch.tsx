@@ -9,8 +9,12 @@ interface Props {
 
 async function searchSteam(query: string): Promise<SearchResult[]> {
   const res = await fetch(`/api/steam/search?q=${encodeURIComponent(query)}`);
-  if (!res.ok) return [];
   const data = await res.json();
+  if (!res.ok) {
+    // Surface the real error (e.g. Steam rate limit) instead of silently
+    // returning [] — that made rate-limiting look like "item doesn't exist".
+    throw new Error(data.error ?? "Search failed");
+  }
   return data.results ?? [];
 }
 
@@ -37,8 +41,9 @@ export function ItemSearch({ onAdd }: Props) {
         const r = await searchSteam(trimmed);
         setResults(r);
         setOpen(true);
-      } catch {
-        setError("Search failed. Try again.");
+      } catch (err) {
+        setError((err as Error).message || "Search failed. Try again.");
+        setResults([]);
       } finally {
         setLoading(false);
       }
@@ -133,7 +138,7 @@ export function ItemSearch({ onAdd }: Props) {
         </div>
       )}
 
-      {open && !loading && query.trim().length >= 2 && results.length === 0 && (
+      {open && !loading && !error && query.trim().length >= 2 && results.length === 0 && (
         <div className="absolute z-10 mt-2 w-full rounded-xl border border-white/[0.08] bg-zinc-900/95 px-4 py-3 text-sm text-zinc-500 shadow-2xl backdrop-blur-xl">
           No items found for &ldquo;{query}&rdquo;.
         </div>
