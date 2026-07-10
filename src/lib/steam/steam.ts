@@ -116,9 +116,9 @@ export async function getItemOrders(
       );
     }
     throw new Error(
-      `${marketHashName} không có order book gộp (không phải commodity item — ` +
-        `mỗi item có giá trị riêng, ví dụ skin CS2 theo float). ` +
-        `Chỉ item dạng commodity (TF2, Dota 2, v.v.) mới có bảng lệnh mua/bán.`,
+      `${marketHashName} has no aggregate order book (not a commodity item — ` +
+        `each unit has a unique value, e.g. float-based CS2 skins). ` +
+        `Only commodity items (TF2, Dota 2, etc.) have a buy/sell order book.`,
     );
   }
 
@@ -184,6 +184,37 @@ export async function getPriceHistory(
     price,
     volume: Number(volumeStr),
   }));
+}
+
+/** Base URL for Steam economy item icons; combine with an `icon_url`. */
+const ICON_BASE = "https://community.cloudflare.steamstatic.com/economy/image";
+
+/**
+ * Look up an item's icon and short type/description via the market search
+ * endpoint (returns clean JSON, no HTML scraping needed). Matches by exact
+ * `hash_name` since search is fuzzy.
+ */
+export async function getItemInfo(
+  appid: number,
+  marketHashName: string,
+): Promise<{ iconUrl: string | null; type: string | null } | null> {
+  const url =
+    `${BASE}/search/render/?query=${encodeName(marketHashName)}` +
+    `&appid=${appid}&start=0&count=10&norender=1`;
+  const res = await steamFetch(url);
+  const data = (await res.json()) as {
+    success: boolean;
+    results?: {
+      hash_name: string;
+      asset_description?: { icon_url?: string; type?: string };
+    }[];
+  };
+  const hit = data.results?.find((r) => r.hash_name === marketHashName);
+  if (!hit) return null;
+  const iconUrl = hit.asset_description?.icon_url
+    ? `${ICON_BASE}/${hit.asset_description.icon_url}`
+    : null;
+  return { iconUrl, type: hit.asset_description?.type ?? null };
 }
 
 /**
